@@ -1,0 +1,9 @@
+certbot_version: 2.9.0-1
+certbot_timer_enabled: true
+certbot_base_dir: /etc/letsencrypt
+certbot_hook_pre_dir: "{{ certbot_base_dir }}/renewal-hooks/pre"
+certbot_hook_post_dir: "{{ certbot_base_dir }}/renewal-hooks/post"
+certbot_hook_deploy_dir: "{{ certbot_base_dir }}/renewal-hooks/deploy"
+
+certbot_sync_enabled: false
+certbot_sync_user_name: certbot_user

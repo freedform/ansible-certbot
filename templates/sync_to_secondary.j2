@@ -1,0 +1,4 @@
+rsync -av \
+    -e "ssh -p {{ certbot_sync_peer_port }} -i /home/{{ certbot_sync_user_name }}/.ssh/certbot_sync_key" \
+    --rsync-path="sudo rsync" \
+    -r {{ certbot_base_dir }}/* {{ certbot_sync_user_name }}@{{ certbot_sync_peer_ip }}:{{ certbot_base_dir }}

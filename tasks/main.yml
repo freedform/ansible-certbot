@@ -1,0 +1,102 @@
+---
+# - name: Install certbot
+#   ansible.builtin.apt:
+#     name: "certbot={{ certbot_version }}"
+#     state: present
+#     update_cache: true
+#     allow_downgrade: true
+
+- name: Configure certbot.timer service
+  ansible.builtin.systemd:
+    name: certbot.timer
+    enabled: "{{ certbot_timer_enabled }}"
+
+- name: Certificate synchronization stuff for rsync user
+  when:
+    - certbot_sync_enabled | default(false) | bool
+    - certbot_sync_user_public_key is defined
+    - certbot_sync_user_private_key is defined
+    - certbot_sync_peer_ip is defined
+  block:
+    - name: Create user for certificate synchronization
+      ansible.builtin.user:
+        name: "{{ certbot_sync_user_name }}"
+        shell: /bin/bash
+        create_home: true
+        state: present
+
+    - name: Allow certificate synchronization user passwordless sudo (rsync only)
+      ansible.builtin.copy:
+        dest: "/etc/sudoers.d/{{ certbot_sync_user_name }}"
+        content: |
+          {{ certbot_sync_user_name }} ALL=(root) NOPASSWD: /usr/bin/rsync
+        owner: root
+        group: root
+        mode: '0440'
+        validate: 'visudo -cf %s'
+
+    - name: Ensure .ssh directory exists for cert sync user
+      ansible.builtin.file:
+        path: "/home/{{ certbot_sync_user_name }}/.ssh"
+        state: directory
+        owner: "{{ certbot_sync_user_name }}"
+        group: "{{ certbot_sync_user_name }}"
+        mode: '0700'
+
+    - name: Add SSH public key for ansible
+      ansible.posix.authorized_key:
+        user: "{{ certbot_sync_user_name }}"
+        key: "{{ lookup('file', certbot_sync_user_public_key) }}"
+        state: present
+        key_options: "from=\"{{ certbot_sync_peer_ip }}\""
+
+    - name: Install private SSH key for cert sync user
+      ansible.builtin.copy:
+        src: "{{ certbot_sync_user_private_key }}"
+        dest: "/home/{{ certbot_sync_user_name }}/.ssh/certbot_sync_key"
+        owner: "{{ certbot_sync_user_name }}"
+        group: "{{ certbot_sync_user_name }}"
+        mode: '0600'
+      no_log: true
+
+- name: Certificate synchronization scripts
+  when:
+    - certbot_sync_peer_ip is defined
+    - certbot_sync_peer_port is defined
+  block:
+    - name: Ensure certbot deploy hook directory exists
+      ansible.builtin.file:
+        path: "{{ certbot_hook_deploy_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Fetch SSH host key
+      register: certbot_ssh_keyscan_result
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail &&
+          ssh-keyscan -p {{ certbot_sync_peer_port }} {{ certbot_sync_peer_ip }} 2>/dev/null | grep ssh-ed25519
+        executable: /bin/bash
+      failed_when: certbot_ssh_keyscan_result.rc != 0
+      changed_when: false
+
+    - name: Add remote peer ip to known hosts
+      ansible.builtin.known_hosts:
+        name: "{{ certbot_sync_peer_ip }}"
+        key: "{{ certbot_ssh_keyscan_result.stdout }}"
+        # hash_host: true
+
+    - name: Generate certbot renewal deploy hooks
+      ansible.builtin.template:
+        src: "{{ item }}.j2"
+        dest: "{{ certbot_hook_deploy_dir }}/{{ index }}-{{ item }}.sh"
+        owner: root
+        group: root
+        mode: '0755'
+      loop:
+        - nginx_reload
+        - sync_to_secondary
+      loop_control:
+        index_var: index
