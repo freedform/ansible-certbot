@@ -1,0 +1,8 @@
+galaxy_info:
+  author: freedform
+  description: certbot role
+  min_ansible_version: "2.20"
+  license: MIT
+
+dependencies: []
+
